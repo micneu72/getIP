@@ -146,7 +146,7 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
 <table>
   <tr><th>Feld</th><th>Wert</th></tr>
   <tr><td>Hostname</td><td>${kodihost}</td></tr>
-  <tr><td>Deine IP<:/td><td>${myPublicIP}</td></tr>
+  <tr><td>Deine IP:</td><td>${myPublicIP}</td></tr>
   <tr><td>A-Record</td><td>${currentARecord || "n/a"}</td></tr>
   <tr><td>AAAA-Record</td><td>${currentAAAARecord || "n/a"}</td></tr>
 </table>
