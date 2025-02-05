@@ -1,22 +1,60 @@
 // Variables used by Scriptable.
 // These must be at the very top of the file. Do not edit.
 // icon-color: deep-gray; icon-glyph: magic;
+
 //--------------------------------------------------
-// 1) Einfachere Regex-Funktionen zum Prüfen von IPv4 / IPv6
+// 1) Verbesserte IP-Validierung
 //--------------------------------------------------
 function isIPv4(ip) {
-  // Prüft grob, ob die IP aus vier Zahlenblöcken (je 1–3 Ziffern) besteht
+  // Verbesserte IPv4-Prüfung mit Bereichsvalidierung
   let ipv4Regex = /^(\d{1,3}\.){3}\d{1,3}$/;
-  return ipv4Regex.test(ip);
+  if (!ipv4Regex.test(ip)) return false;
+  
+  // Zusätzliche Prüfung der Zahlenbereiche (0-255)
+  return ip.split('.').every(num => {
+    let n = parseInt(num);
+    return n >= 0 && n <= 255;
+  });
 }
 
 function isIPv6(ip) {
-  // Vereinfacht: Enthält Doppelpunkt und nur [0-9A-Fa-f:]
-  return /^[0-9A-Fa-f:]+$/.test(ip) && ip.includes(":");
+  // Präzisere IPv6-Validierung
+  const ipv6Regex = /^(?:(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}|[0-9A-Fa-f]{1,4}:(?:(?::[0-9A-Fa-f]{1,4}){1,6})|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:))$/;
+  return ipv6Regex.test(ip);
 }
 
 //--------------------------------------------------
-// 2) DNS-Abfragen (optional, wenn du Host-Einträge sehen willst)
+// 2) Verbesserte IP-Abfrage
+//--------------------------------------------------
+async function getPublicIPs() {
+  const services = [
+    "https://ip.micneu.de?format=json",
+    "https://api.ipify.org?format=json",
+    "https://api64.ipify.org?format=json"
+  ];
+  
+  let ips = { ipv4: null, ipv6: null };
+  
+  for (let service of services) {
+    try {
+      let req = new Request(service);
+      let result = await req.loadJSON();
+      let ip = result.ip;
+      
+      if (isIPv4(ip)) ips.ipv4 = ip;
+      if (isIPv6(ip)) ips.ipv6 = ip;
+      
+      if (ips.ipv4 && ips.ipv6) break;
+    } catch (e) {
+      console.log(`Fehler bei ${service}: ${e}`);
+    }
+  }
+  
+  return ips;
+}
+
+//--------------------------------------------------
+// 3) DNS-Abfragen
 //--------------------------------------------------
 async function getARecord(hostname) {
   let url = `https://dns.google/resolve?name=${hostname}&type=A`;
@@ -24,11 +62,9 @@ async function getARecord(hostname) {
   let json = await req.loadJSON();
   
   if (json.Answer && json.Answer.length > 0) {
-    // Erster Eintrag
     return json.Answer[0].data;
-  } else {
-    return null;  // Kein A-Record gefunden
   }
+  return null;
 }
 
 async function getAAAARecord(hostname) {
@@ -38,17 +74,16 @@ async function getAAAARecord(hostname) {
   
   if (json.Answer && json.Answer.length > 0) {
     return json.Answer[0].data;
-  } else {
-    return null;  // Kein AAAA-Record gefunden
   }
+  return null;
 }
 
 //--------------------------------------------------
-// 3) dedyn.io-Update-Funktion
+// 4) dedyn.io-Update-Funktion
 //--------------------------------------------------
 async function updateDedyn(hostname, ipv4, ipv6, token) {
-  // URL je nach vorhandener IP bauen
   let baseUrl = "https://update.dedyn.io/?hostname=" + hostname;
+  
   if (ipv4 && ipv6) {
     baseUrl += `&myipv4=${ipv4}&myipv6=${ipv6}`;
   } else if (ipv4) {
@@ -63,48 +98,38 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
   req.headers = {
     "Authorization": "Token " + token
   };
-  // dedyn.io gibt Text zurück
-  let resp = await req.loadString();
-  return resp;
+  return await req.loadString();
 }
 
 //--------------------------------------------------
-// 4) Haupt-Skript
+// 5) Haupt-Skript
 //--------------------------------------------------
 (async () => {
-  // 4.1) Hier deine dedyn.io-Daten anpassen
+  // 5.1) Konfiguration
   let kodihost = "meinhost.dedyn.io";  // <-- anpassen!
   let dedynToken = "MEIN_SUPER_TOKEN"; // <-- deinen Token eintragen!
 
   try {
-    // 4.2) Eigene öffentliche IP abrufen
-    let reqMyIP = new Request("https://ip.micneu.de?format=json");
-    let resultMyIP = await reqMyIP.loadJSON();
-    let myPublicIP = resultMyIP.ip; // z.B. "203.0.113.45" (IPv4) oder "2001:db8::1" (IPv6)
+    // 5.2) IPs abrufen
+    let myIPs = await getPublicIPs();
+    
+    if (!myIPs.ipv4 && !myIPs.ipv6) {
+      throw new Error("Keine gültige IP gefunden!");
+    }
 
-    // 4.3) Prüfen, ob du IPv4 oder IPv6 hast
-    let haveIPv4 = isIPv4(myPublicIP);
-    let haveIPv6 = isIPv6(myPublicIP);
-
-    // 4.4) DNS-Einträge deines dedyn.io-Hosts abfragen (optional)
+    // 5.3) Aktuelle DNS-Einträge abfragen
     let currentARecord = await getARecord(kodihost);
     let currentAAAARecord = await getAAAARecord(kodihost);
 
-    // 4.5) dedyn.io-Update durchführen
-    let updateResp;
-    if (haveIPv4 && haveIPv6) {
-      // (In der Praxis erhältst du oft nur *eine* IP von ip.micneu.de,
-      //  aber hier die Logik für beide.)
-      updateResp = await updateDedyn(kodihost, myPublicIP, myPublicIP, dedynToken);
-    } else if (haveIPv4) {
-      updateResp = await updateDedyn(kodihost, myPublicIP, null, dedynToken);
-    } else if (haveIPv6) {
-      updateResp = await updateDedyn(kodihost, null, myPublicIP, dedynToken);
-    } else {
-      throw new Error("Keine gültige IP. Weder IPv4 noch IPv6 erkannt.");
-    }
+    // 5.4) Update durchführen
+    let updateResp = await updateDedyn(
+      kodihost,
+      myIPs.ipv4,
+      myIPs.ipv6,
+      dedynToken
+    );
 
-    // 4.6) HTML-Tabelle für den WebView bauen
+    // 5.5) HTML für WebView
     let html = `
 <!DOCTYPE html>
 <html>
@@ -127,9 +152,7 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
       text-align: left;
       font-size: 14px;
     }
-    th {
-      background: #f0f0f0;
-    }
+    th { background: #f0f0f0; }
     .resp {
       white-space: pre-wrap;
       background: #f9f9f9;
@@ -141,27 +164,26 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
   </style>
 </head>
 <body>
+  <h2>dedyn.io Update Ergebnis</h2>
+  <table>
+    <tr><th>Feld</th><th>Wert</th></tr>
+    <tr><td>Hostname</td><td>${kodihost}</td></tr>
+    <tr><td>IPv4</td><td>${myIPs.ipv4 || "nicht verfügbar"}</td></tr>
+    <tr><td>IPv6</td><td>${myIPs.ipv6 || "nicht verfügbar"}</td></tr>
+    <tr><td>A-Record</td><td>${currentARecord || "n/a"}</td></tr>
+    <tr><td>AAAA-Record</td><td>${currentAAAARecord || "n/a"}</td></tr>
+  </table>
 
-<h2>dedyn.io Update Ergebnis</h2>
-<table>
-  <tr><th>Feld</th><th>Wert</th></tr>
-  <tr><td>Hostname</td><td>${kodihost}</td></tr>
-  <tr><td>Deine IP:</td><td>${myPublicIP}</td></tr>
-  <tr><td>A-Record</td><td>${currentARecord || "n/a"}</td></tr>
-  <tr><td>AAAA-Record</td><td>${currentAAAARecord || "n/a"}</td></tr>
-</table>
-
-<div><strong>dedyn.io-Antwort:</strong></div>
-<div class="resp">${updateResp}</div>
-
+  <div><strong>dedyn.io-Antwort:</strong></div>
+  <div class="resp">${updateResp}</div>
 </body>
 </html>
     `;
 
-    // 4.7) WebView erstellen und HTML präsentieren
+    // 5.6) WebView anzeigen
     let wv = new WebView();
     await wv.loadHTML(html);
-    await wv.present(); // Vollbild-Ansicht
+    await wv.present();
 
   } catch (error) {
     console.error(error);
