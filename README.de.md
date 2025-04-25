@@ -44,6 +44,7 @@ In einigen Skripten (z. B. für DynDNs) müssen Sie sich anpassen**Hostname**und
 1.  **Quellcode bearbeiten**  
     Scrollen Sie zu dem Abschnitt, in dem Ihre Variablen definiert sind. Beispiel:
     ```js
-    let kodihost   = "myhost.dedyn.io";  // <– enter your dedyn.io hostname here
-    let dedynToken = "my_super_TOKEN";   // <– insert your dedyn.io token here
+    let domain = "your_domain";          // <-- adjust!
+    let subname = "your_host";               // <-- adjust!
+    let dedynToken = "my_super_TOKEN";    // <-- your Token!
     ```
