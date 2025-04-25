@@ -43,5 +43,6 @@ In some scripts (e.g., for DynDNS) you need to adjust **hostname** and/or **toke
 1. **Edit Source Code**  
    Scroll to the section where your variables are defined. Example:
    ```js
-   let kodihost   = "myhost.dedyn.io";  // <– enter your dedyn.io hostname here
-   let dedynToken = "my_super_TOKEN";   // <– insert your dedyn.io token here
+   let domain = "your_domain";          // <-- adjust!
+   let subname = "your_host";               // <-- adjust!
+   let dedynToken = "my_super_TOKEN";    // <-- your Token!

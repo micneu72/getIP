@@ -56,27 +56,28 @@ async function getPublicIPs() {
 //--------------------------------------------------
 // 3) DNS-Abfragen
 //--------------------------------------------------
-async function getARecord(hostname) {
-  let url = `https://dns.google/resolve?name=${hostname}&type=A`;
+async function getARecord_desec(domain, subname, token) {
+  let url = `https://desec.io/api/v1/domains/${domain}/rrsets/${subname}/A/`;
   let req = new Request(url);
+  req.headers = { "Authorization": "Token " + token };
   let json = await req.loadJSON();
-  
-  if (json.Answer && json.Answer.length > 0) {
-    return json.Answer[0].data;
+  if (json && json.records && json.records.length > 0) {
+    return json.records[0];
   }
   return null;
 }
 
-async function getAAAARecord(hostname) {
-  let url = `https://dns.google/resolve?name=${hostname}&type=AAAA`;
+async function getAAAARecord_desec(domain, subname, token) {
+  let url = `https://desec.io/api/v1/domains/${domain}/rrsets/${subname}/AAAA/`;
   let req = new Request(url);
+  req.headers = { "Authorization": "Token " + token };
   let json = await req.loadJSON();
-  
-  if (json.Answer && json.Answer.length > 0) {
-    return json.Answer[0].data;
+  if (json && json.records && json.records.length > 0) {
+    return json.records[0];
   }
   return null;
 }
+
 
 //--------------------------------------------------
 // 4) dedyn.io-Update-Funktion
@@ -111,8 +112,11 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
 //--------------------------------------------------
 (async () => {
   // 5.1) Konfiguration
-  let kodihost = "meinhost.dedyn.io";  // <-- anpassen!
-  let dedynToken = "MEIN_SUPER_TOKEN"; // <-- deinen Token eintragen!
+  let domain = "your_domain.de";          // <-- adjust!
+  let subname = "your_host";               // <-- adjust!
+  let dedynToken = "my_super_TOKEN";    // <-- your Token!
+  // don't touch this:
+  let kodihost = `${subname}.${domain}`;  // your_host.your_domain.de
 
   try {
     // 5.2) IPs abrufen
@@ -123,98 +127,74 @@ async function updateDedyn(hostname, ipv4, ipv6, token) {
     }
 
     // 5.3) DNS-Einträge abfragen
-    let currentARecord = await getARecord(kodihost);
-    let currentAAAARecord = await getAAAARecord(kodihost);
+    let currentARecord = await getARecord_desec(domain, subname, dedynToken);
+    let currentAAAARecord = await getAAAARecord_desec(domain, subname, dedynToken);
 
-    // 5.4) Update durchführen
-    let updateResult = await updateDedyn(
-      kodihost,
-      myIPs.ipv4,
-      myIPs.ipv6,
-      dedynToken
-    );
+    // 5.4) Vergleichen und ggf. Update durchführen
+    let updateNeeded = false;
+    let updateType = "";
+    let updateResponse = "";
+
+    if (
+      (myIPs.ipv4 && myIPs.ipv4 !== currentARecord) ||
+      (myIPs.ipv6 && myIPs.ipv6 !== currentAAAARecord)
+    ) {
+      updateNeeded = true;
+      // Update durchführen
+      let updateResult = await updateDedyn(
+        kodihost,
+        myIPs.ipv4,
+        myIPs.ipv6,
+        dedynToken
+      );
+      updateType = updateResult.updateType;
+      updateResponse = updateResult.response;
+    } else {
+      updateType = "Kein Update nötig";
+      updateResponse = "Die öffentlichen IP-Adressen stimmen bereits mit den DNS-Einträgen überein. Es wurde kein Update durchgeführt.";
+    }
 
     // 5.5) HTML für WebView
     let html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>dedyn.io Update</title>
-  <style>
-    body { 
-      font-family: -apple-system, sans-serif; 
-      margin: 20px; 
-      background-color: #f5f5f7;
-    }
-    h2 { 
-      margin-bottom: 0.5em; 
-      color: #1d1d1f;
-    }
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      max-width: 600px;
-      margin-bottom: 1em;
-      background-color: white;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    th, td {
-      border: 1px solid #e5e5e5;
-      padding: 12px;
-      text-align: left;
-      font-size: 14px;
-    }
-    th { 
-      background: #f8f8f8;
-      font-weight: 600;
-    }
-    .resp {
-      white-space: pre-wrap;
-      background: white;
-      border-radius: 8px;
-      padding: 15px;
-      font-family: monospace;
-      font-size: 13px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      margin-top: 15px;
-    }
-    .update-type {
-      color: #2c5282;
-      font-weight: bold;
-    }
-    .status-header {
-      font-weight: 600;
-      margin-top: 20px;
-      color: #1d1d1f;
-    }
-  </style>
-</head>
-<body>
-  <h2>dedyn.io Update Ergebnis</h2>
-  <table>
-    <tr><th>Feld</th><th>Wert</th></tr>
-    <tr><td>Hostname</td><td>${kodihost}</td></tr>
-    <tr><td>IPv4</td><td>${myIPs.ipv4 || "nicht verfügbar"}</td></tr>
-    <tr><td>IPv6</td><td>${myIPs.ipv6 || "nicht verfügbar"}</td></tr>
-    <tr><td>A-Record (DNS)</td><td>${currentARecord || "n/a"}</td></tr>
-    <tr><td>AAAA-Record (DNS)</td><td>${currentAAAARecord || "n/a"}</td></tr>
-    <tr><td>Update-Typ</td><td class="update-type">${updateResult.updateType}</td></tr>
-  </table>
-
-  <div class="status-header">dedyn.io-Antwort:</div>
-  <div class="resp">${updateResult.response}</div>
-</body>
-</html>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>dedyn.io Update</title>
+      <style>
+        body { font-family: -apple-system, sans-serif; margin: 20px; background-color: #f5f5f7;}
+        h2 { margin-bottom: 0.5em; color: #1d1d1f;}
+        table { border-collapse: collapse; width: 100%; max-width: 600px; margin-bottom: 1em; background-color: white; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden;}
+        th, td { border: 1px solid #e5e5e5; padding: 12px; text-align: left; font-size: 14px;}
+        th { background: #f8f8f8; font-weight: 600;}
+        .resp { white-space: pre-wrap; background: white; border-radius: 8px; padding: 15px; font-family: monospace; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-top: 15px;}
+        .update-type { color: #2c5282; font-weight: bold;}
+        .status-header { font-weight: 600; margin-top: 20px; color: #1d1d1f;}
+      </style>
+    </head>
+    <body>
+      <h2>dedyn.io Update Ergebnis</h2>
+      <table>
+        <tr><th>Feld</th><th>Wert</th></tr>
+        <tr><td>Hostname</td><td>${kodihost}</td></tr>
+        <tr><td>IPv4</td><td>${myIPs.ipv4 || "nicht verfügbar"}</td></tr>
+        <tr><td>IPv6</td><td>${myIPs.ipv6 || "nicht verfügbar"}</td></tr>
+        <tr><td>A-Record (DNS)</td><td>${currentARecord || "n/a"}</td></tr>
+        <tr><td>AAAA-Record (DNS)</td><td>${currentAAAARecord || "n/a"}</td></tr>
+        <tr><td>Update-Typ</td><td class="update-type">${updateType}</td></tr>
+      </table>
+      <div class="status-header">dedyn.io-Antwort:</div>
+      <div class="resp">${updateResponse}</div>
+    </body>
+    </html>
     `;
 
-    // 5.6) WebView anzeigen
-    let wv = new WebView();
-    await wv.loadHTML(html);
-    await wv.present();
+  // 5.6) WebView anzeigen
+  let wv = new WebView();
+  await wv.loadHTML(html);
+  await wv.present();
+
 
   } catch (error) {
     console.error(error);
